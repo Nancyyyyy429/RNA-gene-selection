@@ -1,0 +1,112 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+# Load necessary libraries
+library(limma)
+library(caret)
+library(dplyr)
+library(cluster)
+if (!requireNamespace("gplots", quietly = TRUE)) install.packages("gplots")
+library(gplots)
+library(RColorBrewer)
+library(randomForest)
+
+# Load the dataset
+METABRIC <- read.csv("/Users/charry/Documents/COURSE/PHB221/finalproject/METABRIC_RNA_Mutation.csv")  
+
+# Data pre-processing
+# Select all numeric columns for gene expression data
+METABRIC_RNA <- select_if(METABRIC, is.numeric)
+
+# Select columns starting from gene expression score columns while keeping patient ID
+start_col <- which(names(METABRIC) == "brca1")
+if (length(start_col) > 0) {
+  METABRIC_RNA <- dplyr::select(METABRIC, c(1, start_col:ncol(METABRIC)))
+} else {
+  stop("Column 'brca1' not found in the dataset")
+}
+
+# Transpose data frame and set column names to patient ID
+METABRIC_RNA <- setNames(data.frame(t(METABRIC_RNA[,-1])), METABRIC_RNA[,1])
+
+# Create data matrix
+METABRIC_RNA <- data.matrix(METABRIC_RNA)
+
+# Normalize the microarray data using quantile normalization
+METABRIC_RNA_normalized <- normalizeBetweenArrays(METABRIC_RNA, method = "quantile")
+
+# Hierarchical clustering using the normalized data
+# Perform hierarchical clustering using Ward's method
+d <- dist(t(METABRIC_RNA_normalized))
+hc <- hclust(d, method = "ward.D2")
+
+# Determine the optimal number of clusters using silhouette method
+K <- 2:10
+sh <- NULL
+for (i in K) {
+  sh <- c(sh, median(silhouette(cutree(hc, k = i), dist = d)[, 3], na.rm = TRUE))
+}
+
+# Plot silhouette to a file
+png("silhouette_plot.png", width = 800, height = 600)
+plot(K, sh, type = "l", main = "Median silhouette", xlab = "Number of clusters", ylab = "Median silhouette")
+dev.off()
+
+# Obtain optimal clusters
+cl <- cutree(hc, k = K[which.max(sh)])
+
+# Counts of each cluster
+cat("Cluster 1 count: ", sum(cl == 1), "\n")
+cat("Cluster 2 count: ", sum(cl == 2), "\n")
+
+# Heatmap with 2 clusters using the normalized data
+cols <- colors()[seq(9, length(colors()), len = length(unique(cl)))]
+png("heatmap_2_clusters.png", width = 1200, height = 1000)
+heatmap.2(METABRIC_RNA_normalized, Colv = as.dendrogram(hc), margins = c(3, 3), labCol = cl, trace = "none", ColSideColors = cols[cl], col = redblue(100))
+dev.off()
+
+# Cut tree for 4 clusters
+cl <- cutree(hc, k = 4)
+
+# Counts of each cluster
+cat("Cluster 1 count: ", sum(cl == 1), "\n")
+cat("Cluster 2 count: ", sum(cl == 2), "\n")
+cat("Cluster 3 count: ", sum(cl == 3), "\n")
+cat("Cluster 4 count: ", sum(cl == 4), "\n")
+
+# Heatmap with 4 clusters using the normalized data
+cols <- colors()[seq(9, length(colors()), len = length(unique(cl)))]
+png("heatmap_4_clusters.png", width = 1200, height = 1000)
+heatmap.2(METABRIC_RNA_normalized, Colv = as.dendrogram(hc), margins = c(5, 5), labCol = cl, trace = "none", ColSideColors = cols[cl], col = redblue(100))
+dev.off()
+
+# Differential Gene Expression Analysis
+# Specify design matrix
+design <- model.matrix(~ as.factor(cl))
+
+# Fit the linear model to the normalized microarray data
+DE.object <- lmFit(METABRIC_RNA_normalized, design)
+
+# Perform Empirical Bayes moderation
+DE.object <- eBayes(DE.object)
+
+# Extract top 20 list of statistically significant DE genes
+DE.top <- topTable(DE.object, number = 20, adjust.method = "BH")
+DE_genes <- rownames(DE.top)
+print(DE_genes)
+
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
